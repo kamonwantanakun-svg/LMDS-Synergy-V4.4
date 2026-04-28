@@ -118,10 +118,11 @@ function scorePersonCandidate(inputNorm, candidateNorm) {
   if (inputNorm === candidateNorm) return 100;
   
   const dice = diceCoefficient(inputNorm, candidateNorm);
+  const lev = levenshteinSimilarity(inputNorm, candidateNorm);
   const ratio = lengthRatio(inputNorm, candidateNorm);
   
-  // คำนวณคะแนนรวม: (ความเหมือนตัวอักษร 80%) + (สัดส่วนความยาว 20%)
-  const finalScore = Math.round(((dice * 0.8) + (ratio * 0.2)) * 100);
+  // V4.5: Dice 50% + Levenshtein 30% + LengthRatio 20%
+  const finalScore = Math.round(((dice * 0.5) + (lev * 0.3) + (ratio * 0.2)) * 100);
   
   // ถ้าสั้นเกินไปหรือต่างกันเกินไป ให้ 0 เพื่อเข้า Review
   return finalScore > 60 ? finalScore : 0;
@@ -168,5 +169,84 @@ function createPersonAlias(personId, aliasRaw, aliasNormalized) {
 }
 
 function updatePersonStats(personId) {
-  // สำหรับการใช้งานจริง ควรใช้วิธีรวบยอดอัปเดตเพื่อไม่ให้ช้า
+  if (!personId) return false;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('M_PERSON');
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0] === personId) {
+      const usage = parseInt(data[i][6], 10) || 0;
+      sheet.getRange(i + 1, 6).setValue(new Date()); // last_seen_date
+      sheet.getRange(i + 1, 7).setValue(usage + 1);   // usage_count
+      return true;
+    }
+  }
+  return false;
+}
+
+function getPersonById(personId) {
+  if (!personId) return null;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('M_PERSON');
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0] === personId) {
+      return {
+        personId: data[i][0],
+        canonicalName: data[i][1],
+        normalizedName: data[i][2],
+        phone: data[i][3],
+        firstSeen: data[i][4],
+        lastSeen: data[i][5],
+        usageCount: data[i][6],
+        status: data[i][7],
+        note: data[i][8]
+      };
+    }
+  }
+  return null;
+}
+
+function findPersonById(personId) {
+  return getPersonById(personId);
+}
+
+function mergePersonRecords(sourceId, targetId, email) {
+  if (!sourceId || !targetId || sourceId === targetId) return false;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  const aliasSheet = ss.getSheetByName('M_PERSON_ALIAS');
+  const aliasData = aliasSheet.getDataRange().getValues();
+  for (let i = 1; i < aliasData.length; i++) {
+    if (aliasData[i][1] === sourceId) {
+      aliasSheet.getRange(i + 1, 2).setValue(targetId);
+      aliasSheet.getRange(i + 1, 7).setValue(new Date());
+    }
+  }
+
+  const factSheet = ss.getSheetByName('FACT_DELIVERY');
+  const factData = factSheet.getDataRange().getValues();
+  for (let i = 1; i < factData.length; i++) {
+    if (factData[i][15] === sourceId) factSheet.getRange(i + 1, 16).setValue(targetId);
+  }
+
+  const dstSheet = ss.getSheetByName('M_DESTINATION');
+  const dstData = dstSheet.getDataRange().getValues();
+  for (let i = 1; i < dstData.length; i++) {
+    if (dstData[i][1] === sourceId) {
+      dstSheet.getRange(i + 1, 2).setValue(targetId);
+      dstSheet.getRange(i + 1, 6).setValue(buildDestinationKey(targetId, dstData[i][2], dstData[i][3]));
+    }
+  }
+
+  const pSheet = ss.getSheetByName('M_PERSON');
+  const pData = pSheet.getDataRange().getValues();
+  for (let i = 1; i < pData.length; i++) {
+    if (pData[i][0] === sourceId) {
+      pSheet.getRange(i + 1, 8).setValue('Merged');
+      pSheet.getRange(i + 1, 9).setValue(`Merged -> ${targetId} by ${email || 'SYSTEM'} at ${new Date().toISOString()}`);
+      break;
+    }
+  }
+  return true;
 }

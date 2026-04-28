@@ -54,6 +54,35 @@ function upsertFactDelivery(factRowArray) {
   sheet.appendRow(factRowArray);
 }
 
+/**
+ * เขียน FACT แบบชุดเดียว เพื่อลดเวลาจาก appendRow หลายรอบ
+ */
+function batchWriteFacts(factRows) {
+  if (!factRows || factRows.length === 0) return 0;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('FACT_DELIVERY');
+  const lastRow = sheet.getLastRow();
+  const existingSourceIds = new Set();
+  if (lastRow > 1) {
+    const existing = sheet.getRange(2, 4, lastRow - 1, 1).getValues();
+    for (let i = 0; i < existing.length; i++) {
+      if (existing[i][0]) existingSourceIds.add(String(existing[i][0]));
+    }
+  }
+
+  const rowsToWrite = [];
+  for (let i = 0; i < factRows.length; i++) {
+    const sourceRecordId = String(factRows[i][3] || '');
+    if (!sourceRecordId || existingSourceIds.has(sourceRecordId)) continue;
+    existingSourceIds.add(sourceRecordId);
+    rowsToWrite.push(factRows[i]);
+  }
+
+  if (rowsToWrite.length === 0) return 0;
+  sheet.getRange(sheet.getLastRow() + 1, 1, rowsToWrite.length, rowsToWrite[0].length).setValues(rowsToWrite);
+  return rowsToWrite.length;
+}
+
 function preventDuplicateTransaction(sourceRecordId) {
   if (!sourceRecordId) return false;
   

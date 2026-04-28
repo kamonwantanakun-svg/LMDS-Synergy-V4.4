@@ -9,13 +9,14 @@ function resolvePlace(sourceObj) {
   
   if (!addr1 && !addr2) return { id: null, isNew: false, score: 0, candidates: [] };
   
-  // 1. ค้นหาจากที่อยู่หลัก (ที่อยู่ปลายทาง)
-  let res1 = findBestMatch(addr1);
+  const relation = diagnoseTwoAddresses(addr1, addr2);
+  const bestAddress = buildBestAddress(addr1, addr2, relation);
+  let res1 = findBestMatch(bestAddress);
   
   // 2. ถ้าที่อยู่หลักคะแนนไม่สูงพอ ลองค้นหาจากที่อยู่ที่สกัดจาก LatLong
   let res2 = { score: 0 };
   if (addr2 && res1.score < 90) {
-    res2 = findBestMatch(addr2);
+    res2 = findBestMatchWithGeoBoost(addr2);
   }
   
   // 3. เลือกผลลัพธ์ที่ดีที่สุด
@@ -35,6 +36,27 @@ function resolvePlace(sourceObj) {
     const betterRaw = (addr2 && addr2.length > (addr1 ? addr1.length : 0)) ? addr2 : addr1;
     return { ...finalMatch, id: null, isNew: true, raw: betterRaw };
   }
+}
+
+function diagnoseTwoAddresses(rawAddr, geoAddr) {
+  if (rawAddr && geoAddr) {
+    const t1 = extractGeoTokens(rawAddr);
+    const t2 = extractGeoTokens(geoAddr);
+    if (t1.subdistrict && t2.subdistrict && t1.subdistrict === t2.subdistrict) return 'COMPLEMENT';
+    if (normalizeAddress(rawAddr) === normalizeAddress(geoAddr)) return 'DUPLICATE';
+    return 'CONFLICT';
+  }
+  if (geoAddr) return 'GEO_ONLY';
+  if (rawAddr) return 'RAW_ONLY';
+  return 'NONE';
+}
+
+function buildBestAddress(raw, geo, relation) {
+  if (relation === 'GEO_ONLY') return geo || '';
+  if (relation === 'RAW_ONLY') return raw || '';
+  if (relation === 'DUPLICATE') return geo || raw || '';
+  if (relation === 'CONFLICT') return geo || raw || '';
+  return smartMergeAddress(raw, geo);
 }
 
 /**
@@ -63,6 +85,13 @@ function findBestMatch(rawAddress) {
     raw: rawAddress,
     candidates: candidates
   };
+}
+
+function findBestMatchWithGeoBoost(geoAddr) {
+  const result = findBestMatch(geoAddr);
+  result.score = Math.min(100, result.score + 10);
+  result.reason = 'GEO_BOOST';
+  return result;
 }
 
 function findPlaceCandidates(normPlace) {
@@ -145,4 +174,20 @@ function createPlaceAlias(placeId, aliasRaw, aliasNormalized) {
     1,
     'Y'
   ]);
+}
+
+function updatePlaceStats(placeId) {
+  if (!placeId) return false;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('M_PLACE');
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0] === placeId) {
+      const usage = parseInt(data[i][8], 10) || 0;
+      sheet.getRange(i + 1, 8).setValue(new Date());
+      sheet.getRange(i + 1, 9).setValue(usage + 1);
+      return true;
+    }
+  }
+  return false;
 }

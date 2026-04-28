@@ -96,6 +96,7 @@ function getThresholds() {
 function getSheetNames() {
   return {
     SOURCE: getConfig('SOURCE_SHEET_NAME') || 'SCGนครหลวงJWDภูมิภาค',
+    LOOKUP_SOURCE: getConfig('LOOKUP_SOURCE_SHEET_NAME') || 'ตารางงานประจำวัน',
     M_PERSON: 'M_PERSON',
     M_PERSON_ALIAS: 'M_PERSON_ALIAS',
     M_PLACE: 'M_PLACE',
@@ -107,6 +108,14 @@ function getSheetNames() {
     SYS_CONFIG: 'SYS_CONFIG',
     SYS_LOG: 'SYS_LOG',
     RPT_DATA_QUALITY: 'RPT_DATA_QUALITY',
-    MAPS_CACHE: 'MAPS_CACHE'
+    MAPS_CACHE: 'MAPS_CACHE',
+    SYS_TH_GEO: 'SYS_TH_GEO'
   };
+}
+
+/**
+ * ล้างแคช config (ใช้ตอนมีการแก้ SYS_CONFIG ด้วยมือ)
+ */
+function resetConfigCache() {
+  Object.keys(CONFIG_CACHE).forEach(k => delete CONFIG_CACHE[k]);
 }

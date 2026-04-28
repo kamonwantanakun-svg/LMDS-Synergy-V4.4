@@ -110,3 +110,28 @@ function parseRemarkLogic(remark) {
   // 4. เงื่อนไขอื่นๆ
   return { noteType: 'OTHER_WARNING', keywords: text, override: '' };
 }
+
+function validateGeoIndexIntegrity() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('SYS_TH_GEO');
+  if (!sheet) throw new Error('ไม่พบชีต SYS_TH_GEO');
+  const data = sheet.getDataRange().getValues();
+  const seen = {};
+  const duplicates = [];
+  let missing = 0;
+  for (let i = 1; i < data.length; i++) {
+    const key = safeString(data[i][12]); // column M geo_key
+    if (!key) {
+      missing++;
+      continue;
+    }
+    if (seen[key]) duplicates.push(key);
+    seen[key] = true;
+  }
+  return {
+    totalRows: Math.max(0, data.length - 1),
+    duplicateGeoKeys: [...new Set(duplicates)],
+    missingGeoKeyCount: missing,
+    ok: duplicates.length === 0 && missing === 0
+  };
+}
