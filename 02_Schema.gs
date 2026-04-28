@@ -40,6 +40,10 @@ function ensureSystemSheets() {
       throw new Error(`ไม่พบชีตระบบที่จำเป็น: ${names[key]} กรุณากด ติดตั้งระบบครั้งแรก`);
     }
   });
+
+  // V4.5: validate โครงสร้างที่สำคัญเพิ่มเติม
+  validateLookupSchema();
+  validateMasterSchemas();
 }
 
 /**
@@ -85,4 +89,53 @@ function assertRequiredColumns(headers, requiredCols) {
   if (missing.length > 0) {
     throw new Error(`ขาดคอลัมน์ที่จำเป็นในชีตต้นทาง: ${missing.join(', ')}`);
   }
+}
+
+/**
+ * ตรวจ schema ของชีต lookup (ตารางงานประจำวัน)
+ */
+function validateLookupSchema() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheetName = getSheetNames().LOOKUP_SOURCE;
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error(`ไม่พบชีต lookup: ${sheetName}`);
+
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const personCols = safeString(getConfig('LOOKUP_PERSON_COLUMNS') || 'ชื่อปลายทาง').split(',').map(s => s.trim()).filter(Boolean);
+  const placeCols = safeString(getConfig('LOOKUP_PLACE_COLUMNS') || 'ที่อยู่ปลายทาง').split(',').map(s => s.trim()).filter(Boolean);
+
+  const hasAny = (candidates) => candidates.some(c => headers.indexOf(c) !== -1);
+  if (!hasAny(personCols)) {
+    throw new Error(`ชีต ${sheetName} ขาดคอลัมน์ person อย่างน้อย 1 คอลัมน์จาก: ${personCols.join(', ')}`);
+  }
+  if (!hasAny(placeCols)) {
+    throw new Error(`ชีต ${sheetName} ขาดคอลัมน์ place อย่างน้อย 1 คอลัมน์จาก: ${placeCols.join(', ')}`);
+  }
+}
+
+/**
+ * ตรวจ schema ของ master หลักที่ใช้ใน match engine
+ */
+function validateMasterSchemas() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const requiredMap = {
+    'M_PERSON': ['person_id', 'person_name_canonical', 'person_name_normalized', 'phone', 'usage_count'],
+    'M_PLACE': ['place_id', 'place_name_canonical', 'place_name_normalized', 'address_best', 'usage_count'],
+    'M_GEO_POINT': ['geo_id', 'lat_norm', 'long_norm', 'usage_count'],
+    'M_DESTINATION': ['destination_id', 'person_id', 'place_id', 'geo_id', 'destination_key', 'usage_count']
+  };
+
+  Object.keys(requiredMap).forEach(sheetName => {
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet) throw new Error(`ไม่พบชีต master: ${sheetName}`);
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(h => safeString(h).trim());
+    const missing = requiredMap[sheetName].filter(col => headers.indexOf(col) === -1);
+    if (missing.length > 0) {
+      throw new Error(`ชีต ${sheetName} ขาดคอลัมน์: ${missing.join(', ')}`);
+    }
+  });
+}
+
+function resetSourceColumnMapCache() {
+  SOURCE_COL_MAP_CACHE = null;
 }
