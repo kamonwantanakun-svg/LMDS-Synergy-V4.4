@@ -51,6 +51,13 @@ function normalizePersonName(name) {
   return safeTrim(n);
 }
 
+function extractPersonOnly(name) {
+  if (!name) return '';
+  let n = normalizePersonName(name);
+  n = n.replace(/\b(ร้าน|บริษัท|บจก|หจก|จำกัด|สาขา|โกดัง|คลัง|รับเหมา)\b/gi, ' ');
+  return safeTrim(n.replace(/\s+/g, ' '));
+}
+
 /**
  * มาตรฐานชื่อสถานที่
  */
@@ -362,6 +369,15 @@ function normalizeLatLong(lat, lng) {
   };
 }
 
+function validateLatLng(lat, lng) {
+  const la = safeNumber(lat);
+  const lo = safeNumber(lng);
+  if (!la || !lo) return { valid: false, reason: 'ZERO_OR_EMPTY' };
+  if (Math.abs(la) > 90 || Math.abs(lo) > 180) return { valid: false, reason: 'OUT_OF_RANGE' };
+  if (la < 4 || la > 21 || lo < 97 || lo > 106) return { valid: false, reason: 'OUTSIDE_THAILAND' };
+  return { valid: true, reason: 'OK' };
+}
+
 /**
  * สร้าง Geohash แบบง่ายโดยใช้ทศนิยม
  * 1 ทศนิยม = ~11 km
@@ -389,4 +405,88 @@ function buildFingerprint(dataObj) {
     hash |= 0; // Convert to 32bit integer
   }
   return hash.toString(16);
+}
+
+/**
+ * ตัดคำลงท้ายชื่อบริษัทให้เป็นมาตรฐานสำหรับ matching
+ */
+function normalizeCompanyName(companyName) {
+  if (!companyName) return '';
+  let n = normalizeThaiText(companyName);
+  n = n.replace(/\b(บริษัท|ห้างหุ้นส่วนจำกัด|หจก\.?|บจก\.?|จำกัด|มหาชน|บมจ\.?)\b/gi, ' ');
+  n = n.replace(/[()\-_,.]/g, ' ');
+  return safeTrim(n.replace(/\s+/g, ' '));
+}
+
+/**
+ * แปลงข้อความพิกัดหลายรูปแบบเป็น {lat, lng}
+ * รองรับตัวอย่าง:
+ * - "13.7563,100.5018"
+ * - "Lat:13.7563 Long:100.5018"
+ * - "จุดส่ง 13.7563 100.5018"
+ */
+function parseLatLongText(text) {
+  const fallback = { lat: null, lng: null };
+  if (!text) return fallback;
+  const raw = String(text).trim();
+
+  const direct = raw.match(/(-?\d{1,2}\.\d+)\s*[, ]\s*(-?\d{1,3}\.\d+)/);
+  if (direct) {
+    const lat = safeNumber(direct[1]);
+    const lng = safeNumber(direct[2]);
+    if (Math.abs(lat) <= 90 && Math.abs(lng) <= 180) return { lat, lng };
+  }
+
+  const labeled = raw.match(/lat(?:itude)?\s*[:=]?\s*(-?\d{1,2}\.\d+).*?(?:lng|long|longitude)\s*[:=]?\s*(-?\d{1,3}\.\d+)/i);
+  if (labeled) {
+    const lat = safeNumber(labeled[1]);
+    const lng = safeNumber(labeled[2]);
+    if (Math.abs(lat) <= 90 && Math.abs(lng) <= 180) return { lat, lng };
+  }
+
+  const nums = raw.match(/-?\d{1,3}\.\d+/g);
+  if (nums && nums.length >= 2) {
+    const lat = safeNumber(nums[0]);
+    const lng = safeNumber(nums[1]);
+    if (Math.abs(lat) <= 90 && Math.abs(lng) <= 180) return { lat, lng };
+  }
+
+  return fallback;
+}
+
+function extractGeoTokens(address) {
+  const n = normalizeThaiText(address || '');
+  return {
+    subdistrict: ((n.match(/(?:ต\.|ตำบล|แขวง)\s*([ก-๙A-Za-z0-9]+)/) || [])[1]) || '',
+    district: ((n.match(/(?:อ\.|อำเภอ|เขต)\s*([ก-๙A-Za-z0-9]+)/) || [])[1]) || '',
+    province: ((n.match(/(?:จ\.|จังหวัด)\s*([ก-๙A-Za-z0-9]+)/) || [])[1]) || '',
+    postcode: ((n.match(/\b\d{5}\b/) || [])[0]) || ''
+  };
+}
+
+function isLowQualityPersonName(name) {
+  const n = safeTrim(name);
+  if (!n) return true;
+  if (n.length < 2) return true;
+  if (/^\d+$/.test(n)) return true;
+  if (/^(ไม่ระบุ|unknown|n\/a|na|-|ไม่ทราบ)$/i.test(n)) return true;
+  return false;
+}
+
+function isLowQualityPlaceText(text) {
+  const n = safeTrim(text);
+  if (!n) return true;
+  if (n.length < 8) return true;
+  if (/^(ไม่ระบุ|unknown|n\/a|na|-|ไม่ทราบ)$/i.test(n)) return true;
+  return false;
+}
+
+function buildDataQualityFlags(sourceObj) {
+  const flags = [];
+  if (isLowQualityPersonName(sourceObj.destinationNameRaw)) flags.push('LOW_QUALITY_PERSON');
+  if (isLowQualityPlaceText(sourceObj.addressRaw) && isLowQualityPlaceText(sourceObj.addressFromLatLong)) flags.push('LOW_QUALITY_PLACE');
+  const latValid = validateLatLng(sourceObj.latRaw, sourceObj.longRaw);
+  if (!latValid.valid) flags.push('MISSING_LAT_LONG');
+  if (!sourceObj.ownerNameNormalized) flags.push('MISSING_OWNER_CONTEXT');
+  return flags;
 }

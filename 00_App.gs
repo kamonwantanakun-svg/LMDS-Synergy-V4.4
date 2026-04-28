@@ -11,8 +11,10 @@ function onOpen() {
     .addItem('2. ประมวลผลข้อมูลประจำวัน', 'runDailyProcess')
     .addItem('3. อัปเดตพจนานุกรมสถานที่ (SYS_TH_GEO)', 'buildGeoIndex')
     .addItem('4. รีเซ็ตแถวที่เลือกเพื่อรันใหม่', 'reprocessSelectedRows')
+    .addItem('5. Lookup เติม LatLong (ตารางงานประจำวัน)', 'runLookupEnrichment')
     .addSeparator()
-    .addItem('5. อัปเดตสถิติและ Report', 'runNightlyMaintenance')
+    .addItem('6. อัปเดตสถิติและ Report', 'runNightlyMaintenance')
+    .addItem('7. Self-test กฎความขัดแย้ง R01-R08', 'runConflictRuleSelfTest')
     .addToUi();
 }
 
@@ -73,6 +75,7 @@ function runDailyProcess() {
     let successCount = 0;
     let reviewCount = 0;
     let errorCount = 0;
+    const factRowsBuffer = [];
 
     for (let i = startIdx; i < rowsToProcess.length; i++) {
       // ตรวจสอบเวลา (Safety Watch) - ป้องกัน Error 6 นาทีของ Google
@@ -93,7 +96,7 @@ function runDailyProcess() {
         
         if (decision === 'AUTO_MATCH') {
           const factRow = buildFactRow(sourceObj, result);
-          upsertFactDelivery(factRow);
+          factRowsBuffer.push(factRow);
           markSourceRowProcessed(rowItem.sourceIndex, 'SUCCESS');
           successCount++;
         } else {
@@ -108,6 +111,10 @@ function runDailyProcess() {
         writeLog('ERROR', '00_App', 'runDailyProcess', `Row_${rowItem.sourceIndex}`, e.message, e.stack);
         errorCount++;
       }
+    }
+
+    if (factRowsBuffer.length > 0) {
+      batchWriteFacts(factRowsBuffer);
     }
 
     // เมื่อประมวลผลเสร็จสิ้นทั้งหมด
@@ -173,5 +180,27 @@ function onEdit(e) {
         SpreadsheetApp.getActiveSpreadsheet().toast(err.message, '❌ เกิดข้อผิดพลาด', 10);
       }
     }
+  }
+}
+
+/**
+ * งานดูแลระบบประจำวัน/กลางคืน
+ * - รีเฟรชรายงานคุณภาพข้อมูล
+ * - ตั้งค่าสถานะการรัน
+ */
+function runNightlyMaintenance() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  try {
+    if (typeof reportNightlyMaintenance === 'function') {
+      reportNightlyMaintenance();
+    } else {
+      refreshQualityReport();
+    }
+    updateRunStatus('MAINTENANCE_COMPLETED', 'Nightly maintenance completed');
+    ss.toast('อัปเดตรายงานและสถิติเรียบร้อยแล้ว', '✅ Nightly Maintenance', 8);
+  } catch (e) {
+    updateRunStatus('MAINTENANCE_FAILED', e.message);
+    writeLog('ERROR', '00_App', 'runNightlyMaintenance', '', e.message, e.stack || '');
+    ss.toast('Nightly maintenance ล้มเหลว: ' + e.message, '❌ Error', 12);
   }
 }

@@ -137,6 +137,32 @@ function lengthRatio(s1, s2) {
   return Math.min(l1, l2) / Math.max(l1, l2);
 }
 
+function levenshteinDistance(s1, s2) {
+  const a = safeString(s1);
+  const b = safeString(s2);
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  const dp = Array.from({ length: a.length + 1 }, () => Array(b.length + 1).fill(0));
+  for (let i = 0; i <= a.length; i++) dp[i][0] = i;
+  for (let j = 0; j <= b.length; j++) dp[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
+    }
+  }
+  return dp[a.length][b.length];
+}
+
+function levenshteinSimilarity(s1, s2) {
+  const a = safeString(s1);
+  const b = safeString(s2);
+  const maxLen = Math.max(a.length, b.length);
+  if (maxLen === 0) return 1;
+  return 1 - (levenshteinDistance(a, b) / maxLen);
+}
+
 /**
  * ระบบ Checkpoint (Progress Tracking)
  */
@@ -220,4 +246,14 @@ function showAutoCloseAlert(message, seconds = 10) {
     .setWidth(350)
     .setHeight(230);
   SpreadsheetApp.getUi().showModelessDialog(html, '📢 สถานะระบบ LMDS');
+}
+
+function withLock(callback) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    return callback();
+  } finally {
+    lock.releaseLock();
+  }
 }

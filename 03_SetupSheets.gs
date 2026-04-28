@@ -8,6 +8,7 @@ function createSystemSheets() {
   const names = getSheetNames();
   
   const schemas = {
+    [names.LOOKUP_SOURCE]: ['ชื่อปลายทาง', 'ที่อยู่ปลายทาง', 'MATCH_STATUS', 'MATCH_LAT', 'MATCH_LONG', 'MATCH_GEO_ID', 'MATCH_CONFIDENCE', 'MATCH_REASON', 'MATCH_UPDATED_AT'],
     [names.M_PERSON]: ['person_id', 'person_name_canonical', 'person_name_normalized', 'phone', 'first_seen_date', 'last_seen_date', 'usage_count', 'status', 'note'],
     [names.M_PERSON_ALIAS]: ['person_alias_id', 'person_id', 'alias_raw', 'alias_normalized', 'source_field', 'first_seen_date', 'last_seen_date', 'usage_count', 'active_flag'],
     [names.M_PLACE]: ['place_id', 'place_name_canonical', 'place_name_normalized', 'address_best', 'address_normalized', 'warehouse_default', 'first_seen_date', 'last_seen_date', 'usage_count', 'status', 'note'],
@@ -19,7 +20,8 @@ function createSystemSheets() {
     [names.SYS_CONFIG]: ['config_key', 'config_value', 'config_group', 'description', 'updated_at'],
     [names.SYS_LOG]: ['log_id', 'run_id', 'created_at', 'level', 'module_name', 'function_name', 'ref_id', 'message', 'payload_json'],
     [names.RPT_DATA_QUALITY]: ['report_date', 'total_source_rows', 'processed_rows', 'new_person_count', 'new_place_count', 'new_geo_count', 'new_destination_count', 'auto_match_count', 'review_count', 'duplicate_alert_count', 'error_count', 'last_refresh_at'],
-    [names.MAPS_CACHE]: ['cache_key', 'cache_value', 'cache_type', 'raw_input', 'updated_at']
+    [names.MAPS_CACHE]: ['cache_key', 'cache_value', 'cache_type', 'raw_input', 'updated_at'],
+    [names.SYS_TH_GEO]: ['รหัสไปรษณีย์', 'แขวง/ตำบล', 'เขต/อำเภอ', 'จังหวัด', 'หมายเหตุ', 'postcode_text', 'subdistrict_norm', 'district_norm', 'province_norm', 'note_type', 'note_keywords', 'postcode_override', 'geo_key', 'active_flag']
   };
 
   Object.keys(schemas).forEach(sheetName => {
@@ -30,8 +32,7 @@ function createSystemSheets() {
     
     const headers = schemas[sheetName];
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-    sheet.getRange(1, 1, 1, headers.length).setFontWeight("bold").setBackground("#f3f3f3");
-    sheet.setFrozenRows(1);
+    applySheetFormatting(sheetName, '#f3f3f3');
   });
 }
 
@@ -47,11 +48,24 @@ function seedInitialConfig() {
     ['AUTO_MATCH_SCORE', '90', 'Engine', 'คะแนนขั้นต่ำในการจับคู่อัตโนมัติ', new Date()],
     ['REVIEW_SCORE_MIN', '75', 'Engine', 'คะแนนขั้นต่ำที่ต้องส่งคนรีวิว', new Date()],
     ['GEO_RADIUS_METER', '50', 'Engine', 'รัศมีความคลาดเคลื่อนพิกัด (เมตร)', new Date()],
-    ['MAX_PROCESS_ROWS_PER_RUN', '500', 'System', 'จำนวนแถวสูงสุดต่อการรัน 1 ครั้ง', new Date()]
+    ['MAX_PROCESS_ROWS_PER_RUN', '500', 'System', 'จำนวนแถวสูงสุดต่อการรัน 1 ครั้ง', new Date()],
+    ['LOOKUP_SOURCE_SHEET_NAME', 'ตารางงานประจำวัน', 'System', 'ชีตที่ใช้ค้นหา LatLong', new Date()],
+    ['LOOKUP_PERSON_COLUMNS', 'ชื่อปลายทาง', 'System', 'คอลัมน์ชื่อบุคคลในชีต Lookup (คั่นด้วย ,)', new Date()],
+    ['LOOKUP_PLACE_COLUMNS', 'ที่อยู่ปลายทาง,ชื่อที่อยู่จาก_LatLong', 'System', 'คอลัมน์ที่อยู่ในชีต Lookup (คั่นด้วย ,)', new Date()]
   ];
   
   const existingData = sheet.getDataRange().getValues();
   if (existingData.length <= 1) { // ถ้ายังไม่มีข้อมูล
     sheet.getRange(2, 1, initialConfigs.length, 5).setValues(initialConfigs);
   }
+}
+
+function applySheetFormatting(sheetName, color) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) return;
+  const bg = color || '#f3f3f3';
+  const lastCol = sheet.getLastColumn() || 1;
+  sheet.getRange(1, 1, 1, lastCol).setFontWeight('bold').setBackground(bg);
+  sheet.setFrozenRows(1);
 }

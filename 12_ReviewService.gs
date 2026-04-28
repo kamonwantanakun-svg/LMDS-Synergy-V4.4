@@ -66,7 +66,7 @@ function getPendingReviews() {
   const pending = [];
   
   for (let i = 1; i < data.length; i++) {
-    if (data[i][15] === 'PENDING') { // status column
+    if (data[i][17] === 'PENDING') { // status column
       let item = {};
       headers.forEach((h, idx) => item[h] = data[i][idx]);
       item.rowIndex = i + 1;
@@ -116,6 +116,9 @@ function applyReviewDecision(reviewId, decision, selectedPersonId) {
       const selectedId = candidateIds[0].trim();
       if (selectedId) {
         createPersonAlias(selectedId, rawName, normalizePersonName(rawName));
+        if (selectedPersonId && selectedPersonId !== selectedId) {
+          mergePersonRecords(selectedPersonId, selectedId, Session.getActiveUser().getEmail());
+        }
       }
     }
   }
@@ -129,4 +132,55 @@ function applyReviewDecision(reviewId, decision, selectedPersonId) {
     const sourceRowIdx = reviewRow[3];
     updateSourceSyncStatus(sourceRowIdx, 'IGNORE');
   }
+}
+
+function learnAliasFromReview(reviewId) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('Q_REVIEW');
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0] === reviewId && data[i][20] === 'MERGE_TO_CANDIDATE') {
+      const raw = data[i][5];
+      const candidate = String(data[i][11] || '').split(',')[0].trim();
+      if (candidate && raw) createPersonAlias(candidate, raw, normalizePersonName(raw));
+      return true;
+    }
+  }
+  return false;
+}
+
+function applyBulkReviewDecision(decisions) {
+  if (!decisions || !decisions.length) return { total: 0, success: 0, failed: 0 };
+  let success = 0;
+  let failed = 0;
+  decisions.forEach(item => {
+    try {
+      applyReviewDecision(item.reviewId, item.decision, item.selectedPersonId || null);
+      learnAliasFromReview(item.reviewId);
+      success++;
+    } catch (e) {
+      failed++;
+    }
+  });
+  return { total: decisions.length, success, failed };
+}
+
+function getReviewSummaryStats() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('Q_REVIEW');
+  const data = sheet.getDataRange().getValues();
+  const summary = { total: 0, pending: 0, resolved: 0, byIssueType: {} };
+  for (let i = 1; i < data.length; i++) {
+    summary.total++;
+    const issue = data[i][1] || 'UNKNOWN';
+    summary.byIssueType[issue] = summary.byIssueType[issue] || { pending: 0, resolved: 0 };
+    if (data[i][17] === 'PENDING') {
+      summary.pending++;
+      summary.byIssueType[issue].pending++;
+    } else if (data[i][17] === 'RESOLVED') {
+      summary.resolved++;
+      summary.byIssueType[issue].resolved++;
+    }
+  }
+  return summary;
 }

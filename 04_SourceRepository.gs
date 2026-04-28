@@ -55,7 +55,10 @@ function mapRowToSourceObject(rowArr, rowNumber) {
     return undefined;
   };
 
-  return {
+  const latLongTextValue = safeString(rowArr[getIdx('จุดส่งสินค้าปลายทาง')]);
+  const parsed = parseLatLongColumn(latLongTextValue, rowArr[getIdx('LAT')], rowArr[getIdx('LONG')]);
+
+  const baseObj = {
     rowNumber: rowNumber,
     idScg: safeString(rowArr[getIdx('ID_SCGนครหลวงJWDภูมิภาค')]),
     invoiceNo: safeString(rowArr[getIdx('Invoice No')]),
@@ -66,11 +69,12 @@ function mapRowToSourceObject(rowArr, rowNumber) {
     licensePlate: safeString(rowArr[getIdx('ทะเบียนรถ')]),
     customerCode: safeString(rowArr[getIdx('รหัสลูกค้า')]),
     ownerName: safeString(rowArr[getIdx('ชื่อเจ้าของสินค้า')]),
+    ownerNameNormalized: normalizeCompanyName(safeString(rowArr[getIdx('ชื่อเจ้าของสินค้า')])),
     destinationNameRaw: safeString(rowArr[getIdx('ชื่อปลายทาง')]),
     addressRaw: safeString(rowArr[getIdx('ที่อยู่ปลายทาง')]),
-    latRaw: safeNumber(rowArr[getIdx('LAT')]),
-    longRaw: safeNumber(rowArr[getIdx('LONG')]),
-    latLongText: safeString(rowArr[getIdx('จุดส่งสินค้าปลายทาง')]),
+    latRaw: parsed.lat,
+    longRaw: parsed.lng,
+    latLongText: latLongTextValue,
     warehouse: safeString(rowArr[getIdx('คลังสินค้า เอสซีจี เจดับเบิ้ลยูดี วังน้อย', ['คลังสินค้า'])]),
     distanceKm: safeNumber(rowArr[getIdx('ระยะทางจากคลัง_Km')]),
     addressFromLatLong: safeString(rowArr[getIdx('ชื่อที่อยู่จาก_LatLong', ['ชื่อที่อยู่จาก LatLong'])]), 
@@ -78,6 +82,29 @@ function mapRowToSourceObject(rowArr, rowNumber) {
     employeeId: safeString(rowArr[getIdx('ID_พนักงาน')]),
     anomalyDetected: safeString(rowArr[getIdx('เหตุผิดปกติที่ตรวจพบ')]),
     validationResult: safeString(rowArr[getIdx('ผลการตรวจสอบงานส่ง')])
+  };
+  return enrichSourceObject(baseObj);
+}
+
+function parseLatLongColumn(latLongText, latCell, lngCell) {
+  const fromText = parseLatLongText(latLongText);
+  const latFromCell = safeNumber(latCell);
+  const lngFromCell = safeNumber(lngCell);
+  const lat = latFromCell || fromText.lat || 0;
+  const lng = lngFromCell || fromText.lng || 0;
+  return { lat, lng, source: latFromCell && lngFromCell ? 'COLUMN' : (fromText.lat && fromText.lng ? 'TEXT' : 'NONE') };
+}
+
+function enrichSourceObject(sourceObj) {
+  const bestAddress = smartMergeAddress(sourceObj.addressRaw, sourceObj.addressFromLatLong);
+  const qualityFlags = buildDataQualityFlags(sourceObj);
+  return {
+    ...sourceObj,
+    personNameNormalized: normalizePersonName(sourceObj.destinationNameRaw),
+    placeNameNormalized: normalizePlaceName(sourceObj.addressRaw || sourceObj.addressFromLatLong),
+    bestAddress: bestAddress,
+    extractedPhones: extractPhoneNumbers((sourceObj.destinationNameRaw || '') + ' ' + (sourceObj.addressRaw || '')),
+    qualityFlags: qualityFlags
   };
 }
 

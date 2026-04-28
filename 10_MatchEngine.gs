@@ -44,13 +44,24 @@ function matchAllEntities(sourceObj) {
   if (finalPersonId && finalPlaceId && finalGeoId) {
     destResult = resolveDestination(finalPersonId, finalPlaceId, finalGeoId, sourceObj);
   }
+  const ruleHits = evaluateConflictRules(personResult, placeResult, geoResult);
+  const rulePenalty = calculateRulePenalty(ruleHits);
+  const qualityFlags = sourceObj.qualityFlags || buildDataQualityFlags(sourceObj);
+  const ownerBonus = evaluateOwnerContextScore(sourceObj, personResult);
+  const finalScore = Math.max(0, compositeScore - rulePenalty + ownerBonus);
+
+  if (finalPersonId) updatePersonStats(finalPersonId);
+  if (finalPlaceId) updatePlaceStats(finalPlaceId);
+  if (finalGeoId) updateGeoStats(finalGeoId);
   
   return {
     person: { ...personResult, finalId: finalPersonId },
     place: { ...placeResult, finalId: finalPlaceId },
     geo: { ...geoResult, finalId: finalGeoId },
     dest: destResult,
-    compositeScore: compositeScore
+    compositeScore: finalScore,
+    ruleHits: ruleHits,
+    qualityFlags: qualityFlags
   };
 }
 
@@ -69,6 +80,7 @@ function calculateCompositeScore(pScore, plScore, gScore, autoCreatedCount, bonu
 
 function decideAutoMatchOrReview(matchResult) {
   const thresholds = getThresholds();
+  if (matchResult.qualityFlags && matchResult.qualityFlags.length > 0) return 'REVIEW';
   
   // ถ้ามีบาง entity ที่หาไม่เจอและไม่ถูกสิทธิ์สร้างใหม่
   if (!matchResult.person.finalId || !matchResult.place.finalId || !matchResult.geo.finalId) {
@@ -104,7 +116,9 @@ function buildReviewPayload(sourceObj, matchResult) {
     candidateGeoIds: cGeoIds,
     score: matchResult.compositeScore,
     recommendedAction: 'MANUAL_REVIEW',
-    note: (analyzeGeoWarning(sourceObj.addressRaw) || '') + 
+    note: (analyzeGeoWarning(sourceObj.addressRaw) || '') +
+          '\nflags=' + (matchResult.qualityFlags || []).join('|') +
+          '\nrules=' + (matchResult.ruleHits || []).map(h => h.code).join('|') +
           '\n💡 ที่อยู่แนะนำ: ' + smartMergeAddress(sourceObj.addressRaw, sourceObj.addressFromLatLong)
   };
 }
@@ -127,15 +141,74 @@ function evaluateThaiGeoBonus(sourceObj) {
   
   if (!rawAddr || !geoAddr) return 0;
   
-  // ดึงตำบลจากที่อยู่ดิบ (รองรับ ต. หรือ ตำบล หรือ แขวง)
-  const subMatch = rawAddr.match(/(?:ต\.|ตำบล|แขวง)\s*([ก-๙]+)/);
-  if (subMatch) {
-    const subName = subMatch[1];
-    // ถ้าพิกัดที่ได้จาก Google (geoAddr) มีชื่อตำบลตรงกับที่พิมพ์มา
-    if (geoAddr.indexOf(subName) > -1) {
-      bonus += 15; // โบนัสความแม่นยำ
-    }
-  }
+  const t1 = extractGeoTokens(rawAddr);
+  const t2 = extractGeoTokens(geoAddr);
+  if (t1.subdistrict && t1.subdistrict === t2.subdistrict) bonus += 15;
+  if (t1.district && t1.district === t2.district) bonus += 10;
+  if (t1.province && t1.province === t2.province) bonus += 5;
+  if (t1.province && t2.province && t1.province !== t2.province) bonus -= 20;
   
   return bonus;
+}
+
+function getConflictRuleTable() {
+  return [
+    { code: 'R01_DUP_PERSON_NAME', severity: 'MEDIUM', penalty: 10 },
+    { code: 'R02_DUP_PLACE_NAME', severity: 'MEDIUM', penalty: 10 },
+    { code: 'R03_DUP_GEO_POINT', severity: 'LOW', penalty: 5 },
+    { code: 'R04_SAME_PERSON_ALIAS_VARIANT', severity: 'MEDIUM', penalty: 8 },
+    { code: 'R05_DIFF_PERSON_SAME_PLACE', severity: 'HIGH', penalty: 15 },
+    { code: 'R06_SAME_PERSON_DIFF_PLACE', severity: 'HIGH', penalty: 15 },
+    { code: 'R07_SAME_PERSON_DIFF_GEO', severity: 'HIGH', penalty: 20 },
+    { code: 'R08_DIFF_PERSON_SAME_GEO', severity: 'HIGH', penalty: 20 }
+  ];
+}
+
+function evaluateConflictRules(personR, placeR, geoR) {
+  const hits = [];
+  if ((personR.candidates || []).length > 1) hits.push({ code: 'R01_DUP_PERSON_NAME' });
+  if ((placeR.candidates || []).length > 1) hits.push({ code: 'R02_DUP_PLACE_NAME' });
+  if ((geoR.candidates || []).length > 1) hits.push({ code: 'R03_DUP_GEO_POINT' });
+  if (personR.score >= 90 && placeR.score < 50) hits.push({ code: 'R06_SAME_PERSON_DIFF_PLACE' });
+  if (personR.score >= 90 && geoR.score < 50) hits.push({ code: 'R07_SAME_PERSON_DIFF_GEO' });
+  if (geoR.score >= 90 && personR.score < 50) hits.push({ code: 'R08_DIFF_PERSON_SAME_GEO' });
+  return dedupeRuleHits(hits);
+}
+
+function dedupeRuleHits(hits) {
+  const map = {};
+  (hits || []).forEach(h => map[h.code] = h);
+  return Object.keys(map).map(k => map[k]);
+}
+
+function calculateRulePenalty(ruleHits) {
+  const table = getConflictRuleTable();
+  let penalty = 0;
+  (ruleHits || []).forEach(hit => {
+    const t = table.find(r => r.code === hit.code);
+    if (t) penalty += t.penalty;
+  });
+  return Math.min(30, penalty);
+}
+
+function runConflictRuleSelfTest() {
+  const tests = [
+    { person: { score: 95, candidates: [1] }, place: { score: 40, candidates: [1] }, geo: { score: 95, candidates: [1] }, expect: 'R06_SAME_PERSON_DIFF_PLACE' },
+    { person: { score: 30, candidates: [1,2] }, place: { score: 30, candidates: [1] }, geo: { score: 90, candidates: [1] }, expect: 'R01_DUP_PERSON_NAME' }
+  ];
+  const failed = [];
+  tests.forEach((t, idx) => {
+    const codes = evaluateConflictRules(t.person, t.place, t.geo).map(x => x.code);
+    if (codes.indexOf(t.expect) === -1) failed.push(idx + 1);
+  });
+  SpreadsheetApp.getUi().alert(failed.length === 0 ? 'Conflict rule self-test: PASS' : 'Conflict rule self-test: FAIL cases ' + failed.join(','));
+}
+
+function evaluateOwnerContextScore(sourceObj, personResult) {
+  const owner = normalizeCompanyName(sourceObj.ownerName || '');
+  const person = normalizePersonName(sourceObj.destinationNameRaw || '');
+  if (!owner || !person) return 0;
+  if (owner.indexOf(person) > -1 || person.indexOf(owner) > -1) return -5;
+  if (personResult.score >= 90) return 3;
+  return 0;
 }
