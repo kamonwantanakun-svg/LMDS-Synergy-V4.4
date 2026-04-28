@@ -173,3 +173,14 @@ function GOOGLEMAPS_DURATION(origin, destination, mode) {
     return "Error/Quota Exceeded";
   }
 }
+
+function clearMapsCache() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(getSheetNames().MAPS_CACHE);
+  if (!sheet) return 0;
+  const last = sheet.getLastRow();
+  if (last > 1) {
+    sheet.deleteRows(2, last - 1);
+  }
+  return Math.max(0, last - 1);
+}

@@ -8,6 +8,8 @@ function resolveGeo(sourceObj) {
   const lng = sourceObj.longRaw;
   
   if (!lat || !lng) return { id: null, isNew: false, score: 0, candidates: [] };
+  const validity = validateLatLng(lat, lng);
+  if (!validity.valid) return { id: null, isNew: false, score: 0, candidates: [], reason: validity.reason };
   
   const normLat = normalizeLatLong(lat, lng).lat;
   const normLng = normalizeLatLong(lat, lng).lng;
@@ -96,4 +98,41 @@ function createGeoPoint(lat, lng, keys, addressHint) {
   ]);
   
   return geoId;
+}
+
+function getGeoById(geoId) {
+  if (!geoId) return null;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('M_GEO_POINT');
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0] === geoId) {
+      return {
+        geoId: data[i][0],
+        latRaw: data[i][1],
+        lngRaw: data[i][2],
+        latNorm: data[i][3],
+        lngNorm: data[i][4],
+        address: data[i][8],
+        usageCount: data[i][11]
+      };
+    }
+  }
+  return null;
+}
+
+function updateGeoStats(geoId) {
+  if (!geoId) return false;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('M_GEO_POINT');
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0] === geoId) {
+      const usage = parseInt(data[i][11], 10) || 0;
+      sheet.getRange(i + 1, 11).setValue(new Date());
+      sheet.getRange(i + 1, 12).setValue(usage + 1);
+      return true;
+    }
+  }
+  return false;
 }

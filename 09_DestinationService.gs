@@ -25,6 +25,7 @@ function resolveDestination(personId, placeId, geoId, sourceObj) {
   }
   
   if (foundId) {
+    updateDestinationStats(foundId);
     return { id: foundId, isNew: false, key: destKey };
   } else {
     // ยังไม่เคยมีการประกอบร่างแบบนี้มาก่อน สร้างใหม่
@@ -57,5 +58,17 @@ function createDestination(personId, placeId, geoId, label, destKey) {
 }
 
 function updateDestinationStats(destinationId) {
-  // สำหรับใช้งานจริง
+  if (!destinationId) return false;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('M_DESTINATION');
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0] === destinationId) {
+      const usage = parseInt(data[i][9], 10) || 0;
+      sheet.getRange(i + 1, 9).setValue(new Date());   // last_seen_date
+      sheet.getRange(i + 1, 10).setValue(usage + 1);   // usage_count
+      return true;
+    }
+  }
+  return false;
 }
